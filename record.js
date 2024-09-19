@@ -32,16 +32,16 @@
         const sessionIsActive = isSessionActive(config.checkSession);
 
         if (sessionId) {
-            console.log("Session ID found in cookie:", sessionId);
+            console.debug("Session ID found in cookie:", sessionId);
         }
 
         if (!sessionIsActive && !enableFallback) {
-            console.log("No active session detected and fallback is disabled. Event recording will not start.");
+            console.debug("No active session detected and fallback is disabled. Event recording will not start.");
             return;
         }
 
         if (!sessionIsActive && enableFallback) {
-            console.log("No active session detected, but fallback is enabled. Recording will start.");
+            console.debug("No active session detected, but fallback is enabled. Recording will start.");
         }
 
         const socket = setupWebSocketConnection(userId, siteId, siteKey, sessionId);
@@ -103,25 +103,25 @@
 
         const siteUrl = window.location.href;
         params += `&siteUrl=${encodeURIComponent(siteUrl)}`;
-        console.log("Full URL:", siteUrl);
-        console.log("session id:", sessionId);
+        console.debug("Full URL:", siteUrl);
+        console.debug("session id:", sessionId);
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const socket = new WebSocket(`${wsProtocol}sessionspyre-production.up.railway.app/ws/record-session/${params}`);
 
-        const socket = new WebSocket(`ws://sessionspyre-production.up.railway.app/ws/record-session/${params}`);
-
-        socket.onopen = () => console.log("WebSocket connection opened");
+        socket.onopen = () => console.debug("WebSocket connection opened");
         socket.onmessage = event => {
-            console.log("Message from server:", event.data);
+            console.debug("Message from server:", event.data);
             const data = JSON.parse(event.data);
-            console.log("Message: ", data.message);
+            console.debug("Message: ", data.message);
             if (data.message && isValidGUID(data.message)) {
                 sessionId = data.message;
                 setCookie('recording_session_id', sessionId, 8);
-                console.log('Session ID received and stored:', sessionId);
+                console.debug('Session ID received and stored:', sessionId);
             } else {
                 console.error('Invalid session ID received:', data.message);
             }
         };
-        socket.onclose = () => console.log("WebSocket connection closed");
+        socket.onclose = () => console.debug("WebSocket connection closed");
 
         return socket;
     }
