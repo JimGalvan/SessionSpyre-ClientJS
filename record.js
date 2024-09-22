@@ -3,6 +3,11 @@
     const COOKIE_NAMES = ['sessionid', 'authToken', 'JSESSIONID', 'csrftoken'];
     const TOKEN_NAMES = ['authToken', 'sessionToken', 'jwtToken', 'accessToken'];
 
+    let reconnectAttempts = 0;
+    const initialDelay = 1000; // 1 second
+    const maxDelay = 30000; // 30 seconds
+    const maxReconnectAttempts = 10;
+
     async function loadRrwebScript() {
         return new Promise((resolve, reject) => {
             const script = document.createElement('script');
@@ -31,20 +36,12 @@
 
         const sessionIsActive = isSessionActive(config.checkSession);
 
-        if (sessionId) {
-            console.debug("Session ID found in cookie:", sessionId);
-        }
-
         if (!sessionIsActive && !enableFallback) {
             console.debug("No active session detected and fallback is disabled. Event recording will not start.");
             return;
         }
 
-        if (!sessionIsActive && enableFallback) {
-            console.debug("No active session detected, but fallback is enabled. Recording will start.");
-        }
-
-        const socket = setupWebSocketConnection(userId, siteId, siteKey, sessionId);
+        const socket = await setupWebSocketConnection(userId, siteId, siteKey, sessionId);
         startRecording(socket, userId, siteId, siteKey);
     }
 
@@ -88,47 +85,75 @@
         if (typeof customCheck === 'function') return customCheck();
 
         return COOKIE_NAMES.some(cookieName => document.cookie.includes(`${cookieName}=`)) ||
-            document.cookie.split(';').some(cookie => {
-                const [, value] = cookie.split('=');
-                return value && value.trim().length > 20 && /^[a-zA-Z0-9_-]+$/.test(value.trim());
-            }) ||
             TOKEN_NAMES.some(tokenName => localStorage.getItem(tokenName) || sessionStorage.getItem(tokenName));
     }
 
     function setupWebSocketConnection(userId, siteId, siteKey, sessionId) {
-        let params = `?userId=${encodeURIComponent(userId)}&siteId=${encodeURIComponent(siteId)}&siteKey=${encodeURIComponent(siteKey)}`;
-        if (sessionId) {
-            params += `&sessionId=${encodeURIComponent(sessionId)}`;
-        }
-
-        const siteUrl = window.location.href;
-        params += `&siteUrl=${encodeURIComponent(siteUrl)}`;
-        console.debug("Full URL:", siteUrl);
-        console.debug("session id:", sessionId);
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-        const socket = new WebSocket(`${wsProtocol}sessionspyre-production.up.railway.app/ws/record-session/${params}`);
-
-        socket.onopen = () => console.debug("WebSocket connection opened");
-        socket.onmessage = event => {
-            console.debug("Message from server:", event.data);
-            const data = JSON.parse(event.data);
-            console.debug("Message: ", data.message);
-            if (data.message && isValidGUID(data.message)) {
-                sessionId = data.message;
-                setCookie('recording_session_id', sessionId, 8);
-                console.debug('Session ID received and stored:', sessionId);
-            } else {
-                console.error('Invalid session ID received:', data.message);
+        return new Promise((resolve) => {
+            let params = `?userId=${encodeURIComponent(userId)}&siteId=${encodeURIComponent(siteId)}&siteKey=${encodeURIComponent(siteKey)}`;
+            if (sessionId) {
+                params += `&sessionId=${encodeURIComponent(sessionId)}`;
             }
-        };
-        socket.onclose = () => console.debug("WebSocket connection closed");
+    
+            const siteUrl = window.location.href;
+            params += `&siteUrl=${encodeURIComponent(siteUrl)}`;
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            let socket = new WebSocket(`${wsProtocol}sessionspyre-production.up.railway.app/ws/record-session/${params}`);
+    
+            socket.onopen = () => {
+                console.debug("WebSocket connection opened");
+                reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+                resolve(socket);
+            };
+    
+            socket.onmessage = event => {
+                const data = JSON.parse(event.data);
+                if (data.message && isValidGUID(data.message)) {
+                    sessionId = data.message;
+                    setCookie('recording_session_id', sessionId, 8);
+                } else {
+                    console.error('Invalid session ID received:', data.message);
+                }
+            };
+    
+            socket.onclose = (event) => {
+                console.debug(`WebSocket connection closed with code: ${event.code}`);
+                
+                // Check for specific error codes where we should not reconnect
+                if (event.code === 4004) {
+                    console.error("WebSocket closed due to invalid authorization. No reconnect will be attempted.");
+                    return; // Stop reconnection attempts for unauthorized or invalid connections
+                }
+    
+                // For any other close event, attempt to reconnect
+                attemptReconnect(userId, siteId, siteKey, sessionId);
+            };
+    
+            socket.onerror = () => {
+                console.error("WebSocket error occurred");
+                socket.close(); // Close the connection and attempt reconnect
+            };
+        });
+    }
+    
+    function attemptReconnect(userId, siteId, siteKey, sessionId) {
+        if (reconnectAttempts < maxReconnectAttempts) {
+            const delay = Math.min(initialDelay * Math.pow(2, reconnectAttempts), maxDelay);
+            reconnectAttempts++;
+            console.log(`Reconnecting in ${delay / 1000} seconds... (Attempt ${reconnectAttempts})`);
 
-        return socket;
+            setTimeout(() => {
+                setupWebSocketConnection(userId, siteId, siteKey, sessionId).then((socket) => {
+                    startRecording(socket, userId, siteId, siteKey);
+                });
+            }, delay);
+        } else {
+            console.error("Max reconnect attempts reached. Please check your network connection.");
+        }
     }
 
     function startRecording(socket, userId, siteId, siteKey) {
         let events = [];
-
         const stopRecording = rrweb.record({
             emit(event) {
                 events.push(event);
@@ -141,19 +166,11 @@
                     }));
                     events = [];
                 }
-            },
-            sampling: {
-                input: 'last',
-                mouseInteraction: {
-                    MouseUp: false, MouseDown: false, Click: false, ContextMenu: false,
-                    DblClick: false, Focus: false, Blur: false, TouchStart: false, TouchEnd: false,
-                },
             }
         });
 
         window.addEventListener('beforeunload', () => {
             if (events.length > 0) {
-
                 socket.send(JSON.stringify({
                     user_id: userId,
                     site_id: siteId,
