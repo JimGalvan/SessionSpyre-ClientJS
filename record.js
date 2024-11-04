@@ -183,7 +183,7 @@
             };
 
             socket.onerror = (e) => {
-                logger.error($`WebSocket error occurred: ${e.message}`);
+                logger.error(`WebSocket error occurred: ${e.message}`);
                 socket.close(); // Close the connection and attempt reconnect
             };
         });
