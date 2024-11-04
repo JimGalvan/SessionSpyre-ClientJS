@@ -182,8 +182,8 @@
                 attemptReconnect(userId, siteId, siteKey, sessionId);
             };
 
-            socket.onerror = () => {
-                logger.error("WebSocket error occurred");
+            socket.onerror = (e) => {
+                logger.error($`WebSocket error occurred: ${e.message}`);
                 socket.close(); // Close the connection and attempt reconnect
             };
         });
