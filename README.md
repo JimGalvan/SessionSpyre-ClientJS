@@ -81,4 +81,4 @@ The script expects a global `window.recordConfig` object with the following prop
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the Creative Commons Attribution-NonCommercial 4.0 International Public License.
