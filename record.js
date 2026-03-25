@@ -138,7 +138,8 @@
             const siteUrl = window.location.href;
             params += `&siteUrl=${encodeURIComponent(siteUrl)}`;
             const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            let socket = new WebSocket(`${wsProtocol}sessionspyre-production.up.railway.app/ws/record-session/${params}`);
+            const wsHost = '__WS_HOST__';
+            let socket = new WebSocket(`${wsProtocol}${wsHost}/ws/record-session/${params}`);
 
             socket.onopen = () => {
                 logger.debug("WebSocket connection opened");
